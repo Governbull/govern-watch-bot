@@ -53,14 +53,14 @@ def get_active_raid():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     add_user(u.id, u.username)
-    kb = [[InlineKeyboardButton("Join Community", url="https://t.me/AfWfTbcTgFz1")], [InlineKeyboardButton("Connect X", callback_data="connect")]]
+    kb = [[InlineKeyboardButton("Join Community", url="https://t.me/Governpublic")], [InlineKeyboardButton("Connect X", callback_data="connect")]]
     await update.message.reply_text(f"Welcome to GOVERNBULL - {u.first_name}\n\nUse /verify to start raid, /profile to view profile.", reply_markup=InlineKeyboardMarkup(kb))
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Commands:\n/start - Start\n/verify - Verify raid\n/profile - My profile\n/leaderboard - Top users\n/connect - Connect X\n/setx your_username - Set X handle\n/join - Join raid\n/raid - Show current Raid\n/done - I finished Raid (+50 pts)\n/setraid <link> - Admin only")
 
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Verify: https://t.me/AfWfTbcTgFz1 - Send proof after joining.")
+    await update.message.reply_text("Verify: https://t.me/Governpublic - Send proof after joining.")
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
