@@ -84,6 +84,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("setx", setx))
     app.add_handler(CommandHandler("join", join))
     app.add_handler(CommandHandler("setraid", setraid))
-    print("Bot running...")
-      threading.Thread(target=run_flask, daemon=True).start()
+      print("Bot running...")
+    threading.Thread(target=run_flask, daemon=True).start()
     app.run_polling()
