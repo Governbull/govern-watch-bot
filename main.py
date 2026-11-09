@@ -70,13 +70,11 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Join here: https://t.co/AfwF1RcfZo")
 async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Admin only - Raid set!")
-if __name__ == "__main__":
+  if __name__ == "__main__":
     init_db()
-    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("raid", raid))
     app.add_handler(CommandHandler("verify", verify))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("leaderboard", leaderboard))
@@ -84,6 +82,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("setx", setx))
     app.add_handler(CommandHandler("join", join))
     app.add_handler(CommandHandler("setraid", setraid))
-      print("Bot running...")
+    print("Bot running...")
     threading.Thread(target=run_flask, daemon=True).start()
     app.run_polling()
