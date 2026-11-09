@@ -13,6 +13,8 @@ flask_app = Flask(__name__)
 def home():
     return "Bot is running!"
 DB = "govern.db"
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 def init_db():
     con = sqlite3.connect(DB)
     cur = con.cursor()
@@ -83,8 +85,5 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("join", join))
     app.add_handler(CommandHandler("setraid", setraid))
     print("Bot running...")
-        def run_flask():
-        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-    threading.Thread(target=run_flask, daemon=True).start()
+      threading.Thread(target=run_flask, daemon=True).start()
     app.run_polling()
