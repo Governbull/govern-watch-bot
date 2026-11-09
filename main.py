@@ -1,180 +1,238 @@
 import os
 import sqlite3
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 from flask import Flask
 import threading
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.environ.get("BOT_TOKEN")
-DB = "users.db"
-ADMIN_USERNAME = "GovernBullFounder"
+# ===== CONFIG =====
+TOKEN = os.getenv("BOT_TOKEN")
+GROUP_USERNAME = "@governpublic"
+GROUP_LINK = "https://t.me/governpublic"
+ADMIN_IDS = [1375360019]  # <<<< PUT YOUR TELEGRAM ID HERE
 
-flask_app = Flask(__name__)
+# Points
+POINTS_VERIFY = 20
+POINTS_REFERRAL = 10
+POINTS_REFERRAL_BONUS = 10
+POINTS_RAID = 30
 
-@flask_app.route('/')
+logging.basicConfig(level=logging.INFO)
+
+# ===== DATABASE =====
+def get_db():
+    conn = sqlite3.connect("bot.db")
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, points INTEGER DEFAULT 0, referred_by INTEGER, verified INTEGER DEFAULT 0)")
+    conn.execute("CREATE TABLE IF NOT EXISTS raid (id INTEGER PRIMARY KEY, text TEXT, active INTEGER DEFAULT 0)")
+    return conn
+
+def add_points(user_id, amount):
+    conn = get_db()
+    conn.execute("INSERT OR IGNORE INTO users (user_id, points) VALUES (?, 0)", (user_id,))
+    conn.execute("UPDATE users SET points = points + ? WHERE user_id = ?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+def get_points(user_id):
+    conn = get_db()
+    cur = conn.execute("SELECT points FROM users WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+# ===== HANDLERS =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    args = context.args
+
+    if args and args[0].startswith("ref_"):
+        try:
+            referrer_id = int(args[0].replace("ref_", ""))
+            if referrer_id != user.id:
+                conn = get_db()
+                cur = conn.execute("SELECT referred_by FROM users WHERE user_id = ?", (user.id,))
+                row = cur.fetchone()
+                if not row:
+                    conn.execute("INSERT INTO users (user_id, username, referred_by) VALUES (?, ?, ?)", (user.id, user.username or "", referrer_id))
+                    conn.commit()
+                    add_points(referrer_id, POINTS_REFERRAL)
+                    try:
+                        await context.bot.send_message(chat_id=referrer_id, text=f"🎉 Someone joined with your link! +{POINTS_REFERRAL} points added. Your points: {get_points(referrer_id)}")
+                    except: pass
+                conn.close()
+        except: pass
+    else:
+        conn = get_db()
+        conn.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user.id, user.username or ""))
+        conn.commit()
+        conn.close()
+
+    keyboard = [
+        [InlineKeyboardButton("✅ Join Community", url=GROUP_LINK)],
+    ]
+    text = (
+        f"Hello {user.first_name}! 👋\n\n"
+        f"Welcome to **GovernWatch**.\n\n"
+        f"**Step 1:** Join our Community\n"
+        f"**Step 2:** Send /verify to get +{POINTS_VERIFY} points\n"
+        f"**Step 3:** Invite friends with /referral to get +{POINTS_REFERRAL} each\n\n"
+        f"Your points: {get_points(user.id)} ⭐\n\n"
+        f"Send /help to see all commands."
+    )
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        member = await context.bot.get_chat_member(chat_id=GROUP_USERNAME, user_id=user_id)
+        if member.status in ["member", "administrator", "creator", "restricted"]:
+            conn = get_db()
+            cur = conn.execute("SELECT verified, referred_by FROM users WHERE user_id = ?", (user_id,))
+            row = cur.fetchone()
+            if row and row[0] == 1:
+                await update.message.reply_text("✅ You are already verified! Your points: " + str(get_points(user_id)))
+                conn.close()
+                return
+            conn.execute("UPDATE users SET verified = 1 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            add_points(user_id, POINTS_VERIFY)
+            await update.message.reply_text(f"✅ Verified! You joined the Group. +{POINTS_VERIFY} points added! ⭐\nYour points now: {get_points(user_id)}")
+            if row and row[1]:
+                add_points(row[1], POINTS_REFERRAL_BONUS)
+                try:
+                    await context.bot.send_message(chat_id=row[1], text=f"🎉 Your invitee just verified! +{POINTS_REFERRAL_BONUS} bonus points added.")
+                except: pass
+        else:
+            await update.message.reply_text(f"❌ You have not joined the Group yet.\n\nJoin here first: {GROUP_LINK}\nThen come back and send /verify again")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Join the Group first: {GROUP_LINK}\nThen come back and send /verify again\n\nIf you already joined but it still fails, make sure the Bot is Admin in the Group.")
+
+async def referral(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    bot_username = (await context.bot.get_me()).username
+    link = f"https://t.me/{bot_username}?start=ref_{user.id}"
+    conn = get_db()
+    cur = conn.execute("SELECT COUNT(*) FROM users WHERE referred_by = ?", (user.id,))
+    count = cur.fetchone()[0]
+    conn.close()
+    await update.message.reply_text(
+        f"👥 **Your Referral**\n\n"
+        f"Your link:\n`{link}`\n\n"
+        f"Share this link with friends. For each person who joins with your link, you get +{POINTS_REFERRAL} points.\n"
+        f"If they verify, you get +{POINTS_REFERRAL_BONUS} bonus.\n\n"
+        f"People you invited: {count}\n"
+        f"Your points: {get_points(user.id)} ⭐",
+        parse_mode="Markdown"
+    )
+
+async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"⭐ Your points: {get_points(update.effective_user.id)}\n\nEarn more with /verify, /referral and /raid")
+
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = get_db()
+    cur = conn.execute("SELECT username, points FROM users ORDER BY points DESC LIMIT 10")
+    rows = cur.fetchall()
+    conn.close()
+    text = "🏆 **LEADERBOARD - Top 10**\n\n"
+    for i, (username, pts) in enumerate(rows, 1):
+        name = f"@{username}" if username else "User"
+        text += f"{i}. {name} - {pts} ⭐\n"
+    if not rows:
+        text += "No one yet. Be the first!"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = get_db()
+    cur = conn.execute("SELECT text FROM raid WHERE active = 1 ORDER BY id DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        await update.message.reply_text(f"🔥 **ACTIVE RAID**\n\n{row[0]}\n\nAfter you finish, send /done", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("No active Raid right now. Wait for Admin to post a new one.")
+
+async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("❌ You are not an Admin.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /setraid <raid message>")
+        return
+    text = " ".join(context.args)
+    conn = get_db()
+    conn.execute("UPDATE raid SET active = 0")
+    conn.execute("INSERT INTO raid (text, active) VALUES (?, 1)", (text,))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text(f"✅ Raid set!\n\n{text}")
+
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = get_db()
+    cur = conn.execute("SELECT id FROM raid WHERE active = 1 LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        await update.message.reply_text("No active Raid right now.")
+        return
+    add_points(update.effective_user.id, POINTS_RAID)
+    await update.message.reply_text(f"✅ Received! +{POINTS_RAID} points added. Your points: {get_points(update.effective_user.id)} ⭐")
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📖 **Commands**\n\n"
+        "/start - Start\n"
+        "/verify - Verify you joined the Group (Auto)\n"
+        "/referral - Get your invite link\n"
+        "/points - See your points\n"
+        "/leaderboard - Top 10\n"
+        "/raid - See current Raid\n"
+        "/done - You finished Raid\n"
+        "/help - This list\n\n"
+        "Admin: /setraid, /stats",
+        parse_mode="Markdown"
+    )
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    conn = get_db()
+    cur = conn.execute("SELECT COUNT(*), SUM(points) FROM users")
+    count, total = cur.fetchone()
+    conn.close()
+    await update.message.reply_text(f"📊 Stats:\nUsers: {count}\nTotal Points: {total or 0}")
+
+async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Got it! Send /help to see what I can do. If you joined the Group, send /verify.")
+
+# ===== FLASK KEEP ALIVE (Render) =====
+app = Flask(__name__)
+@app.route("/")
 def home():
     return "Bot is running!"
 
 def run_flask():
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
-def init_db():
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, points INTEGER DEFAULT 0, x_handle TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS raids (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT, active INTEGER DEFAULT 1)")
-    cur.execute("CREATE TABLE IF NOT EXISTS raid_done (user_id INTEGER, raid_id INTEGER, PRIMARY KEY (user_id, raid_id))")
-    con.commit()
-    con.close()
-
-def add_user(user_id, username):
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
-    con.commit()
-    con.close()
-
-def get_user(user_id):
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("SELECT points, x_handle FROM users WHERE user_id=?", (user_id,))
-    row = cur.fetchone()
-    con.close()
-    return row
-
-def get_active_raid():
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("SELECT id, link FROM raids WHERE active=1 ORDER BY id DESC LIMIT 1")
-    row = cur.fetchone()
-    con.close()
-    return row
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    add_user(u.id, u.username)
-    kb = [[InlineKeyboardButton("Join Community", url="https://t.me/Governpublic")], [InlineKeyboardButton("Connect X", callback_data="connect")]]
-    await update.message.reply_text(f"Welcome to GOVERNBULL - {u.first_name}\n\nUse /verify to start raid, /profile to view profile.", reply_markup=InlineKeyboardMarkup(kb))
-
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Commands:\n/start - Start\n/verify - Verify raid\n/profile - My profile\n/leaderboard - Top users\n/connect - Connect X\n/setx your_username - Set X handle\n/join - Join raid\n/raid - Show current Raid\n/done - I finished Raid (+50 pts)\n/setraid <link> - Admin only")
-
-async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Verify: https://t.me/Governpublic - Send proof after joining.")
-
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    row = get_user(u.id)
-    pts = row[0] if row else 0
-    xh = row[1] if row and row[1] else "Not connected"
-    await update.message.reply_text(f"👤 {u.first_name}\nX: @{xh}\nPoints: {pts}")
-
-async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("SELECT username, points FROM users ORDER BY points DESC LIMIT 10")
-    rows = cur.fetchall()
-    con.close()
-    txt = "🏆 LEADERBOARD\n\n" + "\n".join([f"{i+1}. @{r[0]} - {r[1]} pts" for i, r in enumerate(rows)]) if rows else "No users yet."
-    await update.message.reply_text(txt)
-
-async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("To connect X, send:\n/setx your_username\nexample: /setx governbull")
-
-async def setx(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Use: /setx your_username")
-        return
-    handle = context.args[0].replace("@", "")
-    u = update.effective_user
-    add_user(u.id, u.username)
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("UPDATE users SET x_handle=? WHERE user_id=?", (handle, u.id))
-    con.commit()
-    con.close()
-    row = get_user(u.id)
-    if row and row[0] == 0:
-        con = sqlite3.connect(DB)
-        cur = con.cursor()
-        cur.execute("UPDATE users SET points = points + 20 WHERE user_id=?", (u.id,))
-        con.commit()
-        con.close()
-        await update.message.reply_text(f"✅ X connected: @{handle} +20 points")
-    else:
-        await update.message.reply_text(f"✅ X updated: @{handle}")
-
-async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Join here: https://t.me/AfWfTbcTgFz1")
-
-async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    if u.username != ADMIN_USERNAME:
-        await update.message.reply_text("❌ Admin only! Only the Council Admin can set a Raid.")
-        return
-    if not context.args:
-        await update.message.reply_text("Use: /setraid https://x.com/governbull/status/...")
-        return
-    link = context.args[0]
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("UPDATE raids SET active=0")
-    cur.execute("INSERT INTO raids (link, active) VALUES (?, 1)", (link,))
-    con.commit()
-    con.close()
-    await update.message.reply_text(f"🚨 NEW RAID POSTED!\n\nCouncil members, go and complete it:\n❤️ Like\n🔁 Repost\n💬 Comment\n\nLink: {link}\n\nWhen you finish, send /done")
-
-async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    row = get_user(u.id)
-    if not row or not row[1]:
-        await update.message.reply_text("❌ You are not a Council member yet!\nFirst send: /setx your_username")
-        return
-    r = get_active_raid()
-    if not r:
-        await update.message.reply_text("There is no active Raid right now. Please wait for the Admin to post a new one.")
-        return
-    await update.message.reply_text(f"🔥 CURRENT RAID\n\n1. Open this link:\n{r[1]}\n\n2. Like ❤️\n3. Repost 🔁\n4. Comment 💬\n\nWhen you are done, send:\n/done\n\nYou will earn +50 Points!")
-
-async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = update.effective_user
-    row = get_user(u.id)
-    if not row or not row[1]:
-        await update.message.reply_text("❌ First send /setx your_username, then send /raid")
-        return
-    r = get_active_raid()
-    if not r:
-        await update.message.reply_text("There is no active Raid right now.")
-        return
-    raid_id = r[0]
-    con = sqlite3.connect(DB)
-    cur = con.cursor()
-    cur.execute("SELECT * FROM raid_done WHERE user_id=? AND raid_id=?", (u.id, raid_id))
-    exists = cur.fetchone()
-    if exists:
-        con.close()
-        await update.message.reply_text("⚠️ You already received points for this Raid! Please wait for the next Raid.")
-        return
-    cur.execute("INSERT INTO raid_done (user_id, raid_id) VALUES (?, ?)", (u.id, raid_id))
-    cur.execute("UPDATE users SET points = points + 50 WHERE user_id=?", (u.id,))
-    con.commit()
-    con.close()
-    await update.message.reply_text("✅ Raid Completed! +50 Points!\n\nCheck /profile - Your points have increased. Check /leaderboard!")
+def main():
+    threading.Thread(target=run_flask, daemon=True).start()
+    app_bot = ApplicationBuilder().token(TOKEN).build()
+    app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("verify", verify))
+    app_bot.add_handler(CommandHandler("referral", referral))
+    app_bot.add_handler(CommandHandler("myref", referral))
+    app_bot.add_handler(CommandHandler("points", points))
+    app_bot.add_handler(CommandHandler("balance", points))
+    app_bot.add_handler(CommandHandler("leaderboard", leaderboard))
+    app_bot.add_handler(CommandHandler("raid", raid))
+    app_bot.add_handler(CommandHandler("setraid", setraid))
+    app_bot.add_handler(CommandHandler("done", done))
+    app_bot.add_handler(CommandHandler("help", help_cmd))
+    app_bot.add_handler(CommandHandler("stats", stats))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auto_reply))
+    print("Bot running...")
+    app_bot.run_polling()
 
 if __name__ == "__main__":
-    init_db()
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("verify", verify))
-    app.add_handler(CommandHandler("profile", profile))
-    app.add_handler(CommandHandler("leaderboard", leaderboard))
-    app.add_handler(CommandHandler("connect", connect))
-    app.add_handler(CommandHandler("setx", setx))
-    app.add_handler(CommandHandler("join", join))
-    app.add_handler(CommandHandler("setraid", setraid))
-    app.add_handler(CommandHandler("raid", raid))
-    app.add_handler(CommandHandler("done", done))
-    print("Bot running...")
-    threading.Thread(target=run_flask, daemon=True).start()
-    app.run_polling()
+    main()
