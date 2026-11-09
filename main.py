@@ -1,8 +1,17 @@
 import os
+from flask import Flask
+import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import sqlite3
 TOKEN = os.environ.get("BOT_TOKEN")
+  
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!"
 DB = "govern.db"
 def init_db():
     con = sqlite3.connect(DB)
@@ -61,6 +70,7 @@ async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Admin only - Raid set!")
 if __name__ == "__main__":
     init_db()
+    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
@@ -73,4 +83,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("join", join))
     app.add_handler(CommandHandler("setraid", setraid))
     print("Bot running...")
+        def run_flask():
+        flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    threading.Thread(target=run_flask, daemon=True).start()
     app.run_polling()
