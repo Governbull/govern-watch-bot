@@ -10,7 +10,8 @@ import threading
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 GROUP_ID = int(os.getenv("GROUP_ID", "-1004325278182"))
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+# FIXED: Your Admin ID is now hardcoded, no need to set in Render
+ADMIN_ID = int(os.getenv("ADMIN_ID", "1375360019"))
 X_LINK = "https://x.com/Governbull"
 RAID_LINK = os.getenv("RAID_LINK", "https://x.com/Governbull")
 
@@ -411,11 +412,12 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
 
 async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID and ADMIN_ID != 0:
+    # Admin only - now secured with your fixed ID 1375360019
+    if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Admin only.")
         return
     if not context.args:
-        await update.message.reply_text("Usage: /newraid <x_link>")
+        await update.message.reply_text("Usage: /newraid <x_link>\nExample: /newraid https://x.com/Governbull/status/123456")
         return
     link = context.args[0]
     conn = sqlite3.connect(DB)
@@ -424,7 +426,11 @@ async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("INSERT INTO raids (link, active) VALUES (?,1)", (link,))
     conn.commit()
     conn.close()
-    await update.message.reply_text(f"New Raid Set!\n{link}")
+    await update.message.reply_text(f"New Raid Set!\n{link}\n\nEveryone who sends /raid will now see this post.")
+
+async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Alias for /newraid - same function, easier to remember
+    await newraid(update, context)
 
 app = Flask(__name__)
 
@@ -440,6 +446,7 @@ def main():
     print("=== STARTING BOT ===", flush=True)
     print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)} - Length: {len(BOT_TOKEN)}", flush=True)
     print(f"GROUP_ID: {GROUP_ID}", flush=True)
+    print(f"ADMIN_ID: {ADMIN_ID}", flush=True)
     if not BOT_TOKEN:
         print("ERROR: BOT_TOKEN IS MISSING!", flush=True)
         while True:
@@ -466,6 +473,7 @@ def main():
         b.add_handler(CommandHandler("rank", rank_cmd))
         b.add_handler(CommandHandler("leaderboard", leaderboard))
         b.add_handler(CommandHandler("newraid", newraid))
+        b.add_handler(CommandHandler("setraid", setraid))
         b.add_handler(CallbackQueryHandler(button_handler))
         print("Bot Started...", flush=True)
         b.run_polling()
