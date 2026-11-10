@@ -139,13 +139,10 @@ def check_task_condition(uid, task_id, row):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or user.first_name)
-    # Referral tracking: if /start <inviter_id>
     if context.args:
         try:
             inviter = int(context.args[0])
             if inviter != user.id:
-                row = get_user(user.id)
-                # Only count if user is new (0 points and not verified) - simplified: count once via invites
                 conn = sqlite3.connect(DB)
                 c = conn.cursor()
                 c.execute("UPDATE users SET invites = invites + 1 WHERE user_id=?", (inviter,))
@@ -268,3 +265,249 @@ async def myraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not row:
         await update.message.reply_text("Type /verify first.")
         return
+    pts, ver, x, raids, invites, last_daily, streak, last_raid = row
+    await update.message.reply_text(
+        f"YOUR RAID STATS\n\n"
+        f"X: @{x or 'Not Connected'}\n"
+        f"Raids Completed: {raids}\n"
+        f"Points: {pts}\n"
+        f"Rank: #{get_rank(user.id)}"
+    )
+
+async def done_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_done(update.effective_user, update.message.reply_text)
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    if q.data == "raid_done":
+        await handle_done(q.from_user, q.edit_message_text)
+    elif q.data.startswith("claim_"):
+        task_id = q.data.replace("claim_", "")
+        await handle_claim(q.from_user, task_id, q.edit_message_text)
+
+async def handle_done(user, reply_func):
+    row = get_user(user.id)
+    if not row or not row[2]:
+        await reply_func("Connect X first! Type /connect your_x_username")
+        return
+    pts, ver, x, raids, invites, last_daily, streak, last_raid = row
+    now = int(time.time())
+    if now - last_raid < 3600:
+        mins = (3600 - (now - last_raid)) // 60
+        await reply_func(f"Wait {mins} minutes before next Raid claim.\nAnti-spam cooldown: 1 Raid per hour.")
+        return
+    new_pts = pts + 50
+    new_raids = raids + 1
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("UPDATE users SET points=?, raids=?, last_raid_time=? WHERE user_id=?", (new_pts, new_raids, now, user.id))
+    conn.commit()
+    conn.close()
+    await reply_func(
+        f"RAID COUNTED!\n\n"
+        f"X: @{x}\n"
+        f"+50 Points for Raid!\n"
+        f"Total Raids: {new_raids}\n"
+        f"Total Points: {new_pts}\n\n"
+        f"WE GOVERN!"
+    )
+
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    add_user(user.id, user.username or user.first_name)
+    row = get_user(user.id)
+    pts, ver, x, raids, invites, last_daily, streak, last_raid = row
+    today = date.today().isoformat()
+    if last_daily == today:
+        await update.message.reply_text(f"Already claimed today! Streak: {streak} days.\nCome back tomorrow.")
+        return
+    try:
+        last_d = date.fromisoformat(last_daily) if last_daily else None
+        if last_d and (date.today() - last_d).days == 1:
+            new_streak = streak + 1
+        else:
+            new_streak = 1
+    except:
+        new_streak = 1
+    bonus = 50 if new_streak == 7 else 0
+    reward = 10 + bonus
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("UPDATE users SET points = points + ?, last_daily=?, daily_streak=? WHERE user_id=?", (reward, today, new_streak, user.id))
+    conn.commit()
+    conn.close()
+    msg = f"DAILY CHECK-IN!\n\n+10 Points\nStreak: {new_streak} days\nTotal: {pts + reward} Points"
+    if bonus:
+        msg += "\n\n7-DAY BONUS! +50 Extra Points!"
+    await update.message.reply_text(msg)
+
+async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    row = get_user(user.id)
+    if not row:
+        await update.message.reply_text("Type /verify first.")
+        return
+    keyboard = []
+    text = "$GOVERN TASKS\n\n"
+    for t in TASKS:
+        claimed = is_task_claimed(user.id, t["id"])
+        done = check_task_condition(user.id, t["id"], row)
+        if claimed:
+            status = "CLAIMED"
+        elif done:
+            status = "READY - Click Claim"
+            keyboard.append([InlineKeyboardButton(f"Claim {t['title']} +{t['points']}", callback_data=f"claim_{t['id']}")])
+        else:
+            status = "NOT DONE"
+        text += f"{t['title']} - +{t['points']} - {status}\n{t['desc']}\nID: {t['id']}\n\n"
+    text += "To claim via command: /claim <task_id>\nExample: /claim follow_x"
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None)
+
+async def claim_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not context.args:
+        await update.message.reply_text("Usage: /claim <task_id>\nSee /tasks for IDs")
+        return
+    await handle_claim(user, context.args[0], update.message.reply_text)
+
+async def handle_claim(user, task_id, reply_func):
+    row = get_user(user.id)
+    if not row:
+        await reply_func("Type /verify first.")
+        return
+    task = next((t for t in TASKS if t["id"] == task_id), None)
+    if not task:
+        await reply_func("Invalid task ID. See /tasks")
+        return
+    if is_task_claimed(user.id, task_id):
+        await reply_func("Already claimed this task.")
+        return
+    if not check_task_condition(user.id, task_id, row):
+        await reply_func(f"Task not completed yet.\n{task['title']}: {task['desc']}")
+        return
+    claim_task_db(user.id, task_id)
+    add_points(user.id, task["points"])
+    new_row = get_user(user.id)
+    await reply_func(f"TASK COMPLETED!\n\n{task['title']}\n+{task['points']} Points\nTotal: {new_row[0]} Points")
+
+async def invite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    row = get_user(user.id)
+    if not row:
+        await update.message.reply_text("Type /verify first.")
+        return
+    bot_username = context.bot.username
+    link = f"https://t.me/{bot_username}?start={user.id}"
+    await update.message.reply_text(
+        f"YOUR INVITE LINK:\n\n{link}\n\n"
+        f"Share it. When 3 friends join and /verify, you complete the Invite Task (+30).\n"
+        f"Your Invites: {row[4]}"
+    )
+
+async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    row = get_user(update.effective_user.id)
+    if not row:
+        await update.message.reply_text("0 Points. /verify first.")
+        return
+    await update.message.reply_text(f"Points: {row[0]}\nX: @{row[2] or 'Not connected'}\nRaids: {row[3]}\nInvites: {row[4]}\nStreak: {row[6]} days")
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    row = get_user(user.id)
+    if not row:
+        await update.message.reply_text("/verify first.")
+        return
+    pts, ver, x, raids, invites, last_daily, streak, last_raid = row
+    rank = get_rank(user.id)
+    status = "Verified" if ver == 1 else "Not Verified"
+    badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "CHAMPION" if pts >= 100 else "CITIZEN" if pts >= 20 else "NEWCOMER"
+    await update.message.reply_text(
+        f"YOUR $GOVERN PROFILE\n\n"
+        f"Name: @{user.username or user.first_name}\n"
+        f"X: @{x or 'Not Connected'}\n"
+        f"Status: {status}\n"
+        f"Badge: {badge}\n"
+        f"Points: {pts}\n"
+        f"Raids: {raids}\n"
+        f"Invites: {invites}\n"
+        f"Daily Streak: {streak} days\n"
+        f"Rank: #{rank}",
+        parse_mode="Markdown"
+    )
+
+async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    row = get_user(user.id)
+    if not row:
+        await update.message.reply_text("Type /verify first.")
+        return
+    pts = row[0]
+    rank = get_rank(user.id)
+    await update.message.reply_text(f"@{user.username or user.first_name}\nYour Rank: #{rank}\nPoints: {pts}")
+
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT username, points, raids FROM users ORDER BY points DESC LIMIT 10")
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        await update.message.reply_text("No citizens yet. /verify")
+        return
+    txt = "$GOVERN Leaderboard\n\n"
+    for i, (u, p, r) in enumerate(rows, 1):
+        txt += f"{i}. @{u} - {p} pts | {r} raids\n"
+    await update.message.reply_text(txt)
+
+async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID and ADMIN_ID != 0:
+        await update.message.reply_text("Admin only.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /newraid <x_link>")
+        return
+    link = context.args[0]
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("UPDATE raids SET active=0")
+    c.execute("INSERT INTO raids (link, active) VALUES (?,1)", (link,))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text(f"New Raid Set!\n{link}")
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "GOVERN Bot is Live!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+def main():
+    print("=== STARTING BOT ===", flush=True)
+    print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)} - Length: {len(BOT_TOKEN)}", flush=True)
+    print(f"GROUP_ID: {GROUP_ID}", flush=True)
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN IS MISSING IN RENDER ENVIRONMENT!", flush=True)
+        print("Go to Render > Environment > Add BOT_TOKEN", flush=True)
+        while True:
+            time.sleep(60)
+    try:
+        init_db()
+        threading.Thread(target=run_flask, daemon=True).start()
+        print("Flask started, starting Telegram polling...", flush=True)
+        b = ApplicationBuilder().token(BOT_TOKEN).build()
+        b.add_handler(CommandHandler("start", start))
+        b.add_handler(CommandHandler("help", start))
+        b.add_handler(CommandHandler("verify", verify))
+        b.add_handler(CommandHandler("connect", connect))
+        b.add_handler(CommandHandler("raid", raid))
+        b.add_handler(CommandHandler("done", done_cmd))
+        b.add_handler(CommandHandler("myraid", myraid))
+        b.add_handler(CommandHandler("daily", daily))
+        b.add_handler(CommandHandler("tasks", tasks_cmd))
+        b.add_handler(CommandHandler("claim", claim_cmd))
+        b.add_handler(CommandHandler("invite", invite_cm
