@@ -2,7 +2,7 @@ import os
 import sqlite3
 import logging
 import time
-from datetime import datetime, date
+from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
 from flask import Flask
@@ -11,9 +11,7 @@ import threading
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 GROUP_ID = int(os.getenv("GROUP_ID", "-1004325278182"))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-X_HANDLE = "@Governbull"
 X_LINK = "https://x.com/Governbull"
-TELEGRAM_GROUP = "@governpublic"
 RAID_LINK = os.getenv("RAID_LINK", "https://x.com/Governbull")
 
 logging.basicConfig(level=logging.INFO)
@@ -206,14 +204,7 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or user.first_name)
     if not context.args:
-        await update.message.reply_text(
-            "CONNECT YOUR X FIRST (Only Once)\n\n"
-            "Type:\n"
-            "/connect your_x_username\n\n"
-            "Example:\n"
-            "/connect Ukona123",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("CONNECT YOUR X FIRST (Only Once)\n\nType:\n/connect your_x_username\n\nExample:\n/connect Ukona123")
         return
     x_user = context.args[0].replace("@", "").strip()
     conn = sqlite3.connect(DB)
@@ -221,24 +212,13 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("UPDATE users SET x_username=? WHERE user_id=?", (x_user, user.id))
     conn.commit()
     conn.close()
-    await update.message.reply_text(
-        f"X Connected!\n\n"
-        f"Telegram: @{user.username or user.first_name}\n"
-        f"X: @{x_user}\n\n"
-        f"Now you can raid! Type /raid"
-    )
+    await update.message.reply_text(f"X Connected!\n\nTelegram: @{user.username or user.first_name}\nX: @{x_user}\n\nNow you can raid! Type /raid")
 
 async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     row = get_user(user.id)
     if not row or not row[2]:
-        await update.message.reply_text(
-            "CONNECT FIRST OR YOUR WORK WILL NOT COUNT\n\n"
-            "Connect your X first:\n"
-            "/connect your_x_username\n"
-            "Then type /raid again.",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("CONNECT FIRST OR YOUR WORK WILL NOT COUNT\n\nConnect your X first:\n/connect your_x_username\nThen type /raid again.")
         return
     active = get_active_raid()
     link = active[1] if active else RAID_LINK
@@ -255,8 +235,7 @@ async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Follow: https://x.com/Governbull\n"
         "PUBLIC GOAL: Likes 100% | Retweets 100% | Replies 100%\n"
         "WORK TOGETHER - STAY ACTIVE",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def myraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -266,13 +245,7 @@ async def myraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Type /verify first.")
         return
     pts, ver, x, raids, invites, last_daily, streak, last_raid = row
-    await update.message.reply_text(
-        f"YOUR RAID STATS\n\n"
-        f"X: @{x or 'Not Connected'}\n"
-        f"Raids Completed: {raids}\n"
-        f"Points: {pts}\n"
-        f"Rank: #{get_rank(user.id)}"
-    )
+    await update.message.reply_text(f"YOUR RAID STATS\n\nX: @{x or 'Not Connected'}\nRaids Completed: {raids}\nPoints: {pts}\nRank: #{get_rank(user.id)}")
 
 async def done_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_done(update.effective_user, update.message.reply_text)
@@ -304,14 +277,7 @@ async def handle_done(user, reply_func):
     c.execute("UPDATE users SET points=?, raids=?, last_raid_time=? WHERE user_id=?", (new_pts, new_raids, now, user.id))
     conn.commit()
     conn.close()
-    await reply_func(
-        f"RAID COUNTED!\n\n"
-        f"X: @{x}\n"
-        f"+50 Points for Raid!\n"
-        f"Total Raids: {new_raids}\n"
-        f"Total Points: {new_pts}\n\n"
-        f"WE GOVERN!"
-    )
+    await reply_func(f"RAID COUNTED!\n\nX: @{x}\n+50 Points for Raid!\nTotal Raids: {new_raids}\nTotal Points: {new_pts}\n\nWE GOVERN!")
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -399,11 +365,7 @@ async def invite_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     bot_username = context.bot.username
     link = f"https://t.me/{bot_username}?start={user.id}"
-    await update.message.reply_text(
-        f"YOUR INVITE LINK:\n\n{link}\n\n"
-        f"Share it. When 3 friends join and /verify, you complete the Invite Task (+30).\n"
-        f"Your Invites: {row[4]}"
-    )
+    await update.message.reply_text(f"YOUR INVITE LINK:\n\n{link}\n\nShare it. When 3 friends join and /verify, you complete the Invite Task (+30).\nYour Invites: {row[4]}")
 
 async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = get_user(update.effective_user.id)
@@ -422,19 +384,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rank = get_rank(user.id)
     status = "Verified" if ver == 1 else "Not Verified"
     badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "CHAMPION" if pts >= 100 else "CITIZEN" if pts >= 20 else "NEWCOMER"
-    await update.message.reply_text(
-        f"YOUR $GOVERN PROFILE\n\n"
-        f"Name: @{user.username or user.first_name}\n"
-        f"X: @{x or 'Not Connected'}\n"
-        f"Status: {status}\n"
-        f"Badge: {badge}\n"
-        f"Points: {pts}\n"
-        f"Raids: {raids}\n"
-        f"Invites: {invites}\n"
-        f"Daily Streak: {streak} days\n"
-        f"Rank: #{rank}",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text(f"YOUR $GOVERN PROFILE\n\nName: @{user.username or user.first_name}\nX: @{x or 'Not Connected'}\nStatus: {status}\nBadge: {badge}\nPoints: {pts}\nRaids: {raids}\nInvites: {invites}\nDaily Streak: {streak} days\nRank: #{rank}")
 
 async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -491,8 +441,7 @@ def main():
     print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)} - Length: {len(BOT_TOKEN)}", flush=True)
     print(f"GROUP_ID: {GROUP_ID}", flush=True)
     if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN IS MISSING IN RENDER ENVIRONMENT!", flush=True)
-        print("Go to Render > Environment > Add BOT_TOKEN", flush=True)
+        print("ERROR: BOT_TOKEN IS MISSING!", flush=True)
         while True:
             time.sleep(60)
     try:
@@ -510,4 +459,22 @@ def main():
         b.add_handler(CommandHandler("daily", daily))
         b.add_handler(CommandHandler("tasks", tasks_cmd))
         b.add_handler(CommandHandler("claim", claim_cmd))
-        b.add_handler(CommandHandler("invite", invite_cm
+        b.add_handler(CommandHandler("invite", invite_cmd))
+        b.add_handler(CommandHandler("points", points))
+        b.add_handler(CommandHandler("profile", profile))
+        b.add_handler(CommandHandler("myprofile", profile))
+        b.add_handler(CommandHandler("rank", rank_cmd))
+        b.add_handler(CommandHandler("leaderboard", leaderboard))
+        b.add_handler(CommandHandler("newraid", newraid))
+        b.add_handler(CallbackQueryHandler(button_handler))
+        print("Bot Started...", flush=True)
+        b.run_polling()
+    except Exception as e:
+        print(f"FATAL ERROR: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        while True:
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
