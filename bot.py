@@ -8,6 +8,9 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 DB = "govern.db"
 RAID_FILE = "raid.txt"
+GROUP_LINK = "https://t.me/governpublic"
+X_LINK = "https://x.com/Governbull"
+X_HANDLE = "@Governbull"
 
 app = Flask(__name__)
 @app.route('/')
@@ -21,10 +24,15 @@ def run_flask():
 def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, points INTEGER DEFAULT 0, verified INTEGER DEFAULT 0, streak INTEGER DEFAULT 0, last_daily TEXT, last_raid TEXT, invited_by INTEGER)")
+    c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, points INTEGER DEFAULT 0, verified INTEGER DEFAULT 0, streak INTEGER DEFAULT 0, last_daily TEXT, last_raid TEXT, invited_by INTEGER, x_username TEXT, raid_count INTEGER DEFAULT 0)")
     c.execute("CREATE TABLE IF NOT EXISTS raids (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT, active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE IF NOT EXISTS claimed_tasks (user_id INTEGER, task_id TEXT, PRIMARY KEY(user_id, task_id))")
     c.execute("CREATE TABLE IF NOT EXISTS pending (user_id INTEGER, photo_id TEXT)")
+    # Don tsohon DB - kara columns idan babu su
+    try: c.execute("ALTER TABLE users ADD COLUMN x_username TEXT")
+    except: pass
+    try: c.execute("ALTER TABLE users ADD COLUMN raid_count INTEGER DEFAULT 0")
+    except: pass
     conn.commit(); conn.close()
 
 def get_user(uid):
@@ -62,14 +70,20 @@ def save_raid(link):
     c.execute("INSERT INTO raids (link, active) VALUES (?,1)", (link,))
     conn.commit(); conn.close()
 
+def get_invite_count(uid):
+    conn = sqlite3.connect(DB); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE invited_by=?", (uid,))
+    n = c.fetchone()[0]; conn.close(); return n
+
+# TASKS - Duka da hakkinsu, da Link na gaskiya
 TASKS = [
-    {"id": "join_tg", "title": "Join Telegram Group", "points": 20, "desc": "Join @GovernBull"},
-    {"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect"},
-    {"id": "follow_x", "title": "Follow @GovernBull on X", "points": 20, "desc": "Follow on X"},
-    {"id": "first_raid", "title": "Complete First Raid", "points": 50, "desc": "Do 1 raid"},
-    {"id": "raid_10", "title": "Complete 10 Raids", "points": 200, "desc": "Do 10 raids"},
-    {"id": "invite_3", "title": "Invite 3 Friends", "points": 30, "desc": "Share your link"},
-    {"id": "daily_7", "title": "7-Day Daily Streak", "points": 50, "desc": "Use /daily 7 days"},
+    {"id": "join_tg", "title": "Join Telegram Group", "points": 20, "desc": f"Join our Group: {GROUP_LINK}", "url": GROUP_LINK, "url_text": "📲 Join Group"},
+    {"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect @your_username", "url": None, "url_text": None},
+    {"id": "follow_x", "title": f"Follow {X_HANDLE} on X", "points": 20, "desc": f"Follow us: {X_LINK}", "url": X_LINK, "url_text": "🐦 Follow on X"},
+    {"id": "first_raid", "title": "Complete First Raid", "points": 50, "desc": "Do 1 raid and get Admin approval", "url": None, "url_text": None},
+    {"id": "raid_10", "title": "Complete 10 Raids", "points": 200, "desc": "Do 10 raids with approval", "url": None, "url_text": None},
+    {"id": "invite_3", "title": "Invite 3 Friends", "points": 30, "desc": "Share your link from /invite", "url": None, "url_text": None},
+    {"id": "daily_7", "title": "7-Day Daily Streak", "points": 50, "desc": "Use /daily 7 days in a row", "url": None, "url_text": None},
 ]
 
 def is_task_claimed(uid, tid):
@@ -78,7 +92,13 @@ def is_task_claimed(uid, tid):
     r = c.fetchone(); conn.close(); return bool(r)
 
 def check_task(uid, tid, row):
-    if tid in ["join_tg", "connect_x", "follow_x", "first_raid"]: return True
+    # row: 0=user_id, 1=username, 2=points, 3=verified, 4=streak, 5=last_daily, 6=last_raid, 7=invited_by, 8=x_username, 9=raid_count
+    if tid == "join_tg": return True  # Mutum ya danna Join, ya shiga, sannan ya Claim - Bot ba zai iya duba Group Private ba sai da API
+    if tid == "connect_x": return bool(row[8])
+    if tid == "follow_x": return True  # Mutum ya danna Follow, sannan ya Claim - X API ba ya bada damar duba Follow kyauta
+    if tid == "first_raid": return (row[9] or 0) >= 1
+    if tid == "raid_10": return (row[9] or 0) >= 10
+    if tid == "invite_3": return get_invite_count(uid) >= 3
     if tid == "daily_7": return (row[4] or 0) >= 7
     return False
 
@@ -100,9 +120,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
     conn.close()
     kb = [[InlineKeyboardButton("✅ Verify", callback_data="verify")],
+          [InlineKeyboardButton("📲 Join Group", url=GROUP_LINK)],
+          [InlineKeyboardButton("🐦 Follow on X", url=X_LINK)],
           [InlineKeyboardButton("🏆 Leaderboard", callback_data="leaderboard")],
           [InlineKeyboardButton("📋 Tasks", callback_data="tasks")]]
-    await update.message.reply_text(f"👋 Welcome {user.first_name} to GOVERN!\n\nUse /verify to start earning.\nUse /tasks to see tasks.\nUse /raid for active raid.\nUse /daily for daily bonus.", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(f"👋 Welcome {user.first_name} to GOVERN!\n\nUse /verify to start earning.\nUse /tasks to see tasks.\nUse /raid for active raid.\nUse /daily for daily bonus.\nUse /join to join our group.", reply_markup=InlineKeyboardMarkup(kb))
 
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -111,24 +133,39 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if c.rowcount == 0:
         c.execute("INSERT INTO users (user_id, username, verified) VALUES (?,?,1)", (user.id, user.username or user.first_name))
     conn.commit(); conn.close()
-    await update.message.reply_text("✅ Verified! You are now a CITIZEN.\nUse /raid to join raid, /daily for bonus.")
+    kb = [[InlineKeyboardButton("📲 Join Group", url=GROUP_LINK)],
+          [InlineKeyboardButton("🐦 Follow on X", url=X_LINK)],
+          [InlineKeyboardButton("📋 Tasks", callback_data="tasks")]]
+    await update.message.reply_text("✅ Verified! You are now a CITIZEN.\n\nNext: Join Group + Follow on X, then do /tasks", reply_markup=InlineKeyboardMarkup(kb))
+
+async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = [[InlineKeyboardButton("📲 Join GOVERN Group", url=GROUP_LINK)],
+          [InlineKeyboardButton("🐦 Follow on X", url=X_LINK)]]
+    await update.message.reply_text(f"📲 Join our community:\n\nTelegram Group: {GROUP_LINK}\nX: {X_LINK}\n\nAfter joining, go to /tasks and Claim +20 points!", reply_markup=InlineKeyboardMarkup(kb))
 
 async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /connect @your_x_username")
+        await update.message.reply_text("Usage: /connect @your_x_username\nExample: /connect @JohnDoe")
         return
-    await update.message.reply_text(f"✅ X connected: {context.args[0]}\n+10 points!")
-    add_points(update.effective_user.id, 10)
+    x_user = context.args[0].replace("@", "")
+    user = update.effective_user
+    conn = sqlite3.connect(DB); c = conn.cursor()
+    c.execute("UPDATE users SET x_username=? WHERE user_id=?", (x_user, user.id))
+    if c.rowcount == 0:
+        c.execute("INSERT INTO users (user_id, username, x_username) VALUES (?,?,?)", (user.id, user.username or user.first_name, x_user))
+    conn.commit(); conn.close()
+    await update.message.reply_text(f"✅ X connected: @{x_user}\nNow go to /tasks and Claim Connect Your X (+10 points)!")
 
 async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     r = get_active_raid()
     if not r:
-        await update.message.reply_text("No active raid. Wait for admin.")
+        await update.message.reply_text("No active raid yet. Wait for admin to set one with /newraid.")
         return
-    await update.message.reply_text(f"⚡ ACTIVE RAID:\n\n{r[1]}\n\nLike + RT + Comment, then send screenshot here with /done")
+    kb = [[InlineKeyboardButton("🐦 Open Tweet on X", url=r[1])]]
+    await update.message.reply_text(f"⚡ ACTIVE RAID:\n\n{r[1]}\n\n1. Like + RT + Comment on X\n2. Take screenshot\n3. Send screenshot here\nAdmin will approve and give you +10 points.", reply_markup=InlineKeyboardMarkup(kb))
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send your raid screenshot as a photo now.")
+    await update.message.reply_text("Send your raid screenshot as a photo now. Admin will review it.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -136,11 +173,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB); c = conn.cursor()
     c.execute("INSERT INTO pending VALUES (?,?)", (user.id, photo_id))
     conn.commit(); conn.close()
-    await update.message.reply_text("📸 Screenshot received! Waiting for Admin approval. You will get points after approval.")
+    await update.message.reply_text("📸 Screenshot received! Waiting for Admin approval. You will get +10 points after approval.")
     try:
         kb = [[InlineKeyboardButton("✅ Approve +10", callback_data=f"approve_{user.id}"),
                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]]
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, caption=f"🔍 New Raid Proof\n\nFrom: {user.first_name} (@{user.username})\nID: {user.id}\n\nApprove?", reply_markup=InlineKeyboardMarkup(kb))
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, caption=f"🔍 New Raid Proof\n\nFrom: {user.first_name} (@{user.username})\nID: {user.id}\nX: @{get_user(user.id)[8] or 'not connected'}\n\nApprove?", reply_markup=InlineKeyboardMarkup(kb))
     except Exception as e:
         print(f"Could not send to admin: {e}", flush=True)
 
@@ -177,10 +214,18 @@ async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for t in TASKS:
         claimed = is_task_claimed(user.id, t["id"])
         done = check_task(user.id, t["id"], row)
-        status = "CLAIMED" if claimed else ("READY - Click Claim" if done else "NOT DONE")
-        text += f"{t['title']} - {t['points']} pts - {status}\n{t['desc']}\n\n"
+        status = "✅ CLAIMED" if claimed else ("🟢 READY - Click Claim" if done else "🔴 NOT DONE")
+        extra = ""
+        if t["id"] == "first_raid": extra = f" (Raids: {row[9] or 0}/1)"
+        if t["id"] == "raid_10": extra = f" (Raids: {row[9] or 0}/10)"
+        if t["id"] == "invite_3": extra = f" (Invited: {get_invite_count(user.id)}/3)"
+        if t["id"] == "daily_7": extra = f" (Streak: {row[4] or 0}/7)"
+        if t["id"] == "connect_x": extra = f" (X: @{row[8]})" if row[8] else " (Not connected)"
+        text += f"{t['title']} - {t['points']} pts - {status}{extra}\n{t['desc']}\n\n"
+        if t["url"]:
+            kb.append([InlineKeyboardButton(t["url_text"], url=t["url"])])
         if done and not claimed:
-            kb.append([InlineKeyboardButton(f"Claim {t['title']}", callback_data=f"claim_{t['id']}")])
+            kb.append([InlineKeyboardButton(f"✅ Claim {t['title']} +{t['points']} pts", callback_data=f"claim_{t['id']}")])
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb) if kb else None)
 
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -199,7 +244,13 @@ async def handle_claim(user, task_id, reply_func):
     if is_task_claimed(user.id, task_id):
         await reply_func("Already claimed."); return
     if not check_task(user.id, task_id, row):
-        await reply_func(f"Task not completed yet: {task['title']}"); return
+        if task_id == "first_raid": await reply_func(f"Task not done yet: Do 1 raid first. Raids: {row[9] or 0}/1")
+        elif task_id == "raid_10": await reply_func(f"Task not done yet: Do 10 raids. Raids: {row[9] or 0}/10")
+        elif task_id == "invite_3": await reply_func(f"Invite 3 friends first. Invited: {get_invite_count(user.id)}/3. Share /invite")
+        elif task_id == "daily_7": await reply_func(f"Daily streak not 7 yet. Streak: {row[4] or 0}/7. Use /daily")
+        elif task_id == "connect_x": await reply_func("Connect X first: /connect @your_username")
+        else: await reply_func(f"Task not completed yet: {task['title']}")
+        return
     conn = sqlite3.connect(DB); c = conn.cursor()
     c.execute("INSERT INTO claimed_tasks VALUES (?,?)", (user.id, task_id))
     conn.commit(); conn.close()
@@ -212,7 +263,7 @@ async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Type /verify first."); return
     pts = row[2]
     badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "WARRIOR" if pts >= 100 else "CITIZEN"
-    await update.message.reply_text(f"💰 Points: {pts}\n🏅 Badge: {badge}\n🏆 Rank: #{get_rank(update.effective_user.id)}")
+    await update.message.reply_text(f"💰 Points: {pts}\n🏅 Badge: {badge}\n🏆 Rank: #{get_rank(update.effective_user.id)}\n⚡ Approved Raids: {row[9] or 0}")
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -222,7 +273,9 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = row[2]
     badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "WARRIOR" if pts >= 100 else "CITIZEN"
     bot_username = context.bot.username or "GovernWatchBot"
-    await update.message.reply_text(f"👤 {user.first_name}\n@{user.username}\n\nPoints: {pts}\nBadge: {badge}\nRank: #{get_rank(user.id)}\nStreak: {row[4]} days\n\n🔗 Your Invite Link:\nhttps://t.me/{bot_username}?start={user.id}")
+    kb = [[InlineKeyboardButton("📲 Join Group", url=GROUP_LINK)],
+          [InlineKeyboardButton("🐦 Follow on X", url=X_LINK)]]
+    await update.message.reply_text(f"👤 {user.first_name}\n@{user.username}\nX: @{row[8] or 'Not connected'}\n\nPoints: {pts}\nBadge: {badge}\nRank: #{get_rank(user.id)}\nStreak: {row[4]} days\nApproved Raids: {row[9] or 0}\nInvited: {get_invite_count(user.id)} friends\n\n🔗 Your Invite Link:\nhttps://t.me/{bot_username}?start={user.id}\n\nShare it, get +10 points per person!", reply_markup=InlineKeyboardMarkup(kb))
 
 async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -273,11 +326,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = int(q.data.replace("approve_", ""))
         add_points(uid, 10)
         conn = sqlite3.connect(DB); c = conn.cursor()
+        c.execute("UPDATE users SET raid_count=raid_count+1 WHERE user_id=?", (uid,))
         c.execute("DELETE FROM pending WHERE user_id=?", (uid,))
         conn.commit(); conn.close()
-        await q.message.reply_text(f"✅ Approved! User {uid} got +10 points.")
+        await q.message.reply_text(f"✅ Approved! User {uid} got +10 points. Raid count +1.")
         try:
-            await context.bot.send_message(chat_id=uid, text="🎉 Admin ya amince! Ka samu +10 points don Raid dinka!")
+            await context.bot.send_message(chat_id=uid, text="🎉 Admin ya amince! Ka samu +10 points don Raid dinka! Raid count dinka ya karu.")
         except: pass
     elif q.data.startswith("reject_"):
         if q.from_user.id != ADMIN_ID:
@@ -293,7 +347,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
-        await update.message.reply_text("Use /start to see menu, /raid for raid, /daily for bonus.")
+        await update.message.reply_text("Use /start to see menu, /raid for raid, /daily for bonus, /join to join group.")
 
 def main():
     print("=== STARTING BOT ===", flush=True)
@@ -309,6 +363,7 @@ def main():
         b.add_handler(CommandHandler("start", start))
         b.add_handler(CommandHandler("help", start))
         b.add_handler(CommandHandler("verify", verify))
+        b.add_handler(CommandHandler("join", join_cmd))
         b.add_handler(CommandHandler("connect", connect))
         b.add_handler(CommandHandler("raid", raid))
         b.add_handler(CommandHandler("done", done))
