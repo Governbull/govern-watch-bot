@@ -483,3 +483,89 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = "Verified" if ver == 1 else "Not Verified"
     badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "CHAMPION" if pts >= 100 else "CITIZEN" if pts >= 20 else "NEWCOMER"
     await update.message.r
+
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT username, points, raids FROM users ORDER BY points DESC LIMIT 10")
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        await update.message.reply_text("No citizens yet. /verify")
+        return
+    txt = "$GOVERN Leaderboard\n\n"
+    for i, (u, p, r) in enumerate(rows, 1):
+        txt += f"{i}. @{u} - {p} pts | {r} raids\n"
+    await update.message.reply_text(txt)
+
+async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Admin only.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /setraid <x_link>\nExample: /setraid https://x.com/Governbull/status/123456")
+        return
+    link = context.args[0].strip()
+    save_raid_link(link)
+    await update.message.reply_text(f"New Raid Set!\n{link}\n\nEveryone who sends /raid will now see this post.")
+
+async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await newraid(update, context)
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "GOVERN Bot is Live!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+def main():
+    print("=== STARTING BOT ===", flush=True)
+    print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)} - Length: {len(BOT_TOKEN)}", flush=True)
+    print(f"GROUP_ID: {GROUP_ID}", flush=True)
+    print(f"ADMIN_ID: {ADMIN_ID}", flush=True)
+    if not BOT_TOKEN:
+        print("ERROR: BOT_TOKEN IS MISSING!", flush=True)
+        while True:
+            time.sleep(60)
+    try:
+        init_db()
+        threading.Thread(target=run_flask, daemon=True).start()
+        print("Flask started, starting Telegram polling...", flush=True)
+        b = ApplicationBuilder().token(BOT_TOKEN).build()
+        b.add_handler(CommandHandler("start", start))
+        b.add_handler(CommandHandler("help", start))
+        b.add_handler(CommandHandler("verify", verify))
+        b.add_handler(CommandHandler("connect", connect))
+        b.add_handler(CommandHandler("raid", raid))
+        b.add_handler(CommandHandler("done", done_cmd))
+        b.add_handler(CommandHandler("myraid", myraid))
+        b.add_handler(CommandHandler("daily", daily))
+        b.add_handler(CommandHandler("tasks", tasks_cmd))
+        b.add_handler(CommandHandler("claim", claim_cmd))
+        b.add_handler(CommandHandler("invite", invite_cmd))
+        b.add_handler(CommandHandler("points", points))
+        b.add_handler(CommandHandler("profile", profile))
+        b.add_handler(CommandHandler("myprofile", profile))
+        b.add_handler(CommandHandler("rank", rank_cmd))
+        b.add_handler(CommandHandler("leaderboard", leaderboard))
+        b.add_handler(CommandHandler("newraid", newraid))
+        b.add_handler(CommandHandler("setraid", setraid))
+        b.add_handler(CommandHandler("approve", approve))
+        b.add_handler(CommandHandler("reject", reject))
+        b.add_handler(CallbackQueryHandler(button_handler))
+        b.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+        print("Bot Started...", flush=True)
+        b.run_polling()
+    except Exception as e:
+        print(f"FATAL ERROR: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        while True:
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
