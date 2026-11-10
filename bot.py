@@ -28,7 +28,6 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS raids (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT, active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE IF NOT EXISTS claimed_tasks (user_id INTEGER, task_id TEXT, PRIMARY KEY(user_id, task_id))")
     c.execute("CREATE TABLE IF NOT EXISTS pending (user_id INTEGER, photo_id TEXT)")
-    # Don tsohon DB - kara columns idan babu su
     try: c.execute("ALTER TABLE users ADD COLUMN x_username TEXT")
     except: pass
     try: c.execute("ALTER TABLE users ADD COLUMN raid_count INTEGER DEFAULT 0")
@@ -75,7 +74,6 @@ def get_invite_count(uid):
     c.execute("SELECT COUNT(*) FROM users WHERE invited_by=?", (uid,))
     n = c.fetchone()[0]; conn.close(); return n
 
-# TASKS - Duka da hakkinsu, da Link na gaskiya
 TASKS = [
     {"id": "join_tg", "title": "Join Telegram Group", "points": 20, "desc": f"Join our Group: {GROUP_LINK}", "url": GROUP_LINK, "url_text": "📲 Join Group"},
     {"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect @your_username", "url": None, "url_text": None},
@@ -92,10 +90,9 @@ def is_task_claimed(uid, tid):
     r = c.fetchone(); conn.close(); return bool(r)
 
 def check_task(uid, tid, row):
-    # row: 0=user_id, 1=username, 2=points, 3=verified, 4=streak, 5=last_daily, 6=last_raid, 7=invited_by, 8=x_username, 9=raid_count
-    if tid == "join_tg": return True  # Mutum ya danna Join, ya shiga, sannan ya Claim - Bot ba zai iya duba Group Private ba sai da API
+    if tid == "join_tg": return True
     if tid == "connect_x": return bool(row[8])
-    if tid == "follow_x": return True  # Mutum ya danna Follow, sannan ya Claim - X API ba ya bada damar duba Follow kyauta
+    if tid == "follow_x": return True
     if tid == "first_raid": return (row[9] or 0) >= 1
     if tid == "raid_10": return (row[9] or 0) >= 10
     if tid == "invite_3": return get_invite_count(uid) >= 3
@@ -291,102 +288,4 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.message.reply_text("No citizens yet. /verify")
         return
-    txt = "🏆 GOVERN Leaderboard:\n\n"
-    for i, (name, pts) in enumerate(rows, 1):
-        txt += f"{i}. {name or 'User'} - {pts} pts\n"
-    await update.message.reply_text(txt)
-
-async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Admin only."); return
-    if not context.args:
-        await update.message.reply_text("Usage: /newraid <tweet link>")
-        return
-    link = " ".join(context.args)
-    save_raid(link)
-    await update.message.reply_text(f"✅ New Raid Set!\n{link}\n\nEveryone who sends /raid will see this post.")
-
-async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await newraid(update, context)
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    if q.data == "verify":
-        await verify(update, context)
-    elif q.data == "leaderboard":
-        await leaderboard(update, context)
-    elif q.data == "tasks":
-        await tasks_cmd(update, context)
-    elif q.data.startswith("claim_"):
-        await handle_claim(q.from_user, q.data.replace("claim_", ""), q.message.reply_text)
-    elif q.data.startswith("approve_"):
-        if q.from_user.id != ADMIN_ID:
-            await q.message.reply_text("Admin only."); return
-        uid = int(q.data.replace("approve_", ""))
-        add_points(uid, 10)
-        conn = sqlite3.connect(DB); c = conn.cursor()
-        c.execute("UPDATE users SET raid_count=raid_count+1 WHERE user_id=?", (uid,))
-        c.execute("DELETE FROM pending WHERE user_id=?", (uid,))
-        conn.commit(); conn.close()
-        await q.message.reply_text(f"✅ Approved! User {uid} got +10 points. Raid count +1.")
-        try:
-            await context.bot.send_message(chat_id=uid, text="🎉 Admin ya amince! Ka samu +10 points don Raid dinka! Raid count dinka ya karu.")
-        except: pass
-    elif q.data.startswith("reject_"):
-        if q.from_user.id != ADMIN_ID:
-            await q.message.reply_text("Admin only."); return
-        uid = int(q.data.replace("reject_", ""))
-        conn = sqlite3.connect(DB); c = conn.cursor()
-        c.execute("DELETE FROM pending WHERE user_id=?", (uid,))
-        conn.commit(); conn.close()
-        await q.message.reply_text(f"❌ Rejected user {uid}.")
-        try:
-            await context.bot.send_message(chat_id=uid, text="❌ Admin bai amince da screenshot dinka ba. Ka sake gwadawa.")
-        except: pass
-
-async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.text:
-        await update.message.reply_text("Use /start to see menu, /raid for raid, /daily for bonus, /join to join group.")
-
-def main():
-    print("=== STARTING BOT ===", flush=True)
-    print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)}", flush=True)
-    if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN IS MISSING!", flush=True)
-        while True: time.sleep(60)
-    try:
-        init_db()
-        threading.Thread(target=run_flask, daemon=True).start()
-        print("Flask started, starting Telegram polling...", flush=True)
-        b = ApplicationBuilder().token(BOT_TOKEN).build()
-        b.add_handler(CommandHandler("start", start))
-        b.add_handler(CommandHandler("help", start))
-        b.add_handler(CommandHandler("verify", verify))
-        b.add_handler(CommandHandler("join", join_cmd))
-        b.add_handler(CommandHandler("connect", connect))
-        b.add_handler(CommandHandler("raid", raid))
-        b.add_handler(CommandHandler("done", done))
-        b.add_handler(CommandHandler("myraid", raid))
-        b.add_handler(CommandHandler("daily", daily))
-        b.add_handler(CommandHandler("tasks", tasks_cmd))
-        b.add_handler(CommandHandler("claim", claim))
-        b.add_handler(CommandHandler("invite", profile))
-        b.add_handler(CommandHandler("points", points))
-        b.add_handler(CommandHandler("profile", profile))
-        b.add_handler(CommandHandler("rank", rank_cmd))
-        b.add_handler(CommandHandler("leaderboard", leaderboard))
-        b.add_handler(CommandHandler("newraid", newraid))
-        b.add_handler(CommandHandler("setraid", setraid))
-        b.add_handler(CallbackQueryHandler(button_handler))
-        b.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-        b.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
-        print("Bot Started...", flush=True)
-        b.run_polling()
-    except Exception as e:
-        print(f"FATAL ERROR: {e}", flush=True)
-        traceback.print_exc()
-        while True: time.sleep(60)
-
-if __name__ == "__main__":
-    main()
+    txt = "🏆
