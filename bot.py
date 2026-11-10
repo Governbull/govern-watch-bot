@@ -119,6 +119,18 @@ def get_badge(pts):
         return "WARRIOR"
     return "CITIZEN"
 
+async def check_group(update):
+    if update.effective_chat.type in ["group", "supergroup"]:
+        txt = "Please use DM for all Bot commands.\n"
+        txt += "Go to @GovernWatchBot and send your command there.\n"
+        txt += "After you finish, you can share your Badge here."
+        try:
+            await update.message.reply_text(txt)
+        except:
+            pass
+        return True
+    return False
+
 TASKS = []
 TASKS.append({"id": "join_tg", "title": "Join Telegram Group", "points": 20, "desc": "Join Group", "url": GROUP_LINK, "url_text": "Join Group"})
 TASKS.append({"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect @your_username", "url": None, "url_text": None})
@@ -154,6 +166,8 @@ def check_task(uid, tid, row):
     return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     user = update.effective_user
     args = context.args
     invited_by = None
@@ -190,6 +204,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        if update.effective_chat.type in ["group", "supergroup"]:
+            await update.callback_query.answer("Please use DM @GovernWatchBot", show_alert=True)
+            return
+    else:
+        if await check_group(update):
+            return
     user = update.effective_user
     conn = sqlite3.connect(DB)
     c = conn.cursor()
@@ -210,6 +231,8 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
 async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     kb = []
     kb.append([InlineKeyboardButton("Join GOVERN Group", url=GROUP_LINK)])
     kb.append([InlineKeyboardButton("Follow on X", url=X_LINK)])
@@ -220,6 +243,8 @@ async def join_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
 async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     if not context.args:
         await update.message.reply_text("Usage: /connect @your_x_username")
         return
@@ -237,6 +262,8 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
 
 async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     r = get_active_raid()
     if not r:
         await update.message.reply_text("No active raid yet. Wait for admin to set one.")
@@ -250,6 +277,8 @@ async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     await update.message.reply_text("Send your raid screenshot as a photo now. Admin will review it.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,6 +305,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(e, flush=True)
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     user = update.effective_user
     row = get_user(user.id)
     if not row:
@@ -304,6 +335,13 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        if update.effective_chat.type in ["group", "supergroup"]:
+            await update.callback_query.answer("Please use DM @GovernWatchBot", show_alert=True)
+            return
+    else:
+        if await check_group(update):
+            return
     user = update.effective_user
     row = get_user(user.id)
     if not row:
@@ -342,6 +380,8 @@ async def tasks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb) if kb else None)
 
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     if not context.args:
         await update.message.reply_text("Usage: /claim <task_id>")
         return
@@ -374,6 +414,8 @@ async def handle_claim(user, task_id, reply_func):
     await reply_func("Claimed " + task["title"] + "! +" + str(task["points"]) + " points!")
 
 async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     row = get_user(update.effective_user.id)
     if not row:
         await update.message.reply_text("Type /verify first.")
@@ -387,6 +429,8 @@ async def points(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     user = update.effective_user
     row = get_user(user.id)
     if not row:
@@ -411,6 +455,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
 async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     user = update.effective_user
     row = get_user(user.id)
     if not row:
@@ -421,6 +467,13 @@ async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(txt)
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        if update.effective_chat.type in ["group", "supergroup"]:
+            await update.callback_query.answer("Please use DM @GovernWatchBot", show_alert=True)
+            return
+    else:
+        if await check_group(update):
+            return
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("SELECT username, points FROM users ORDER BY points DESC LIMIT 10")
@@ -441,6 +494,8 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(txt)
 
 async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_group(update):
+        return
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Admin only.")
         return
@@ -457,6 +512,9 @@ async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
+    if update.effective_chat.type in ["group", "supergroup"]:
+        await q.answer("Please use DM @GovernWatchBot", show_alert=True)
+        return
     if q.data == "verify":
         await verify(update, context)
     elif q.data == "leaderboard":
