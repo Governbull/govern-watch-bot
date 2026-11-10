@@ -121,9 +121,9 @@ def get_badge(pts):
 
 async def check_group(update):
     if update.effective_chat.type in ["group", "supergroup"]:
-        txt = "Please use DM for all Bot commands.\n"
+        txt = "Please use DM for all bot commands.\n"
         txt += "Go to @GovernWatchBot and send your command there.\n"
-        txt += "After you finish, you can share your Badge here."
+        txt += "After you finish, you can share your badge here."
         try:
             await update.message.reply_text(txt)
         except:
@@ -184,7 +184,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c.execute("UPDATE users SET points=points+10 WHERE user_id=?", (invited_by,))
             conn.commit()
             try:
-                msg = "New person joined with your link! +10 points!"
+                msg = "New user joined with your link! +10 points!"
                 await context.bot.send_message(chat_id=invited_by, text=msg)
             except:
                 pass
@@ -270,9 +270,9 @@ async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     kb = [[InlineKeyboardButton("Open Tweet on X", url=r[1])]]
     txt = "ACTIVE RAID:\n\n" + r[1] + "\n\n"
-    txt += "1. Like + RT + Comment on X\n"
-    txt += "2. Take screenshot\n"
-    txt += "3. Send screenshot here\n"
+    txt += "1. Like + Repost + Comment on X\n"
+    txt += "2. Take a screenshot\n"
+    txt += "3. Send the screenshot here\n"
     txt += "Admin will approve and give you +10 points."
     await update.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
 
@@ -283,7 +283,7 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type in ["group", "supergroup"]:
-        await update.message.reply_text("Please send raid screenshot in DM with @GovernWatchBot, not in group.")
+        await update.message.reply_text("Please send your raid screenshot in DM with @GovernWatchBot, not in the group.")
         return
     user = update.effective_user
     photo_id = update.message.photo[-1].file_id
@@ -292,7 +292,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     c.execute("INSERT INTO pending VALUES (?,?)", (user.id, photo_id))
     conn.commit()
     conn.close()
-    await update.message.reply_text("Screenshot received! Waiting for Admin approval. +10 points after approval.")
+    await update.message.reply_text("Screenshot received! Waiting for admin approval. +10 points after approval.")
     try:
         kb = []
         kb.append([InlineKeyboardButton("Approve +10", callback_data="approve_" + str(user.id))])
@@ -538,7 +538,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         await q.message.reply_text("Approved! User " + str(uid) + " got +10 points.")
         try:
-            await context.bot.send_message(chat_id=uid, text="Admin approved! You got +10 points for your Raid!")
+            await context.bot.send_message(chat_id=uid, text="Raid approved! You received +10 points.")
         except:
             pass
     elif q.data.startswith("reject_"):
@@ -553,7 +553,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         await q.message.reply_text("Rejected user " + str(uid) + ".")
         try:
-            await context.bot.send_message(chat_id=uid, text="Admin did not approve your screenshot. Try again.")
+            await context.bot.send_message(chat_id=uid, text="Your raid screenshot was not approved. Please try again.")
         except:
             pass
 
