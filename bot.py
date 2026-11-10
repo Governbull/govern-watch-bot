@@ -24,6 +24,7 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, points INTEGER DEFAULT 0, verified INTEGER DEFAULT 0, streak INTEGER DEFAULT 0, last_daily TEXT, last_raid TEXT, invited_by INTEGER)")
     c.execute("CREATE TABLE IF NOT EXISTS raids (id INTEGER PRIMARY KEY AUTOINCREMENT, link TEXT, active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE IF NOT EXISTS claimed_tasks (user_id INTEGER, task_id TEXT, PRIMARY KEY(user_id, task_id))")
+    c.execute("CREATE TABLE IF NOT EXISTS pending (user_id INTEGER, photo_id TEXT)")
     conn.commit(); conn.close()
 
 def get_user(uid):
@@ -131,8 +132,17 @@ async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    await update.message.reply_text("📸 Screenshot received! Admin will review. +10 points pending.")
-    add_points(user.id, 10)
+    photo_id = update.message.photo[-1].file_id
+    conn = sqlite3.connect(DB); c = conn.cursor()
+    c.execute("INSERT INTO pending VALUES (?,?)", (user.id, photo_id))
+    conn.commit(); conn.close()
+    await update.message.reply_text("📸 Screenshot received! Waiting for Admin approval. You will get points after approval.")
+    try:
+        kb = [[InlineKeyboardButton("✅ Approve +10", callback_data=f"approve_{user.id}"),
+               InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]]
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_id, caption=f"🔍 New Raid Proof\n\nFrom: {user.first_name} (@{user.username})\nID: {user.id}\n\nApprove?", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception as e:
+        print(f"Could not send to admin: {e}", flush=True)
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -246,14 +256,6 @@ async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await newraid(update, context)
 
-async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    await update.message.reply_text("Approved!")
-
-async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    await update.message.reply_text("Rejected.")
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -265,6 +267,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await tasks_cmd(update, context)
     elif q.data.startswith("claim_"):
         await handle_claim(q.from_user, q.data.replace("claim_", ""), q.message.reply_text)
+    elif q.data.startswith("approve_"):
+        if q.from_user.id != ADMIN_ID:
+            await q.message.reply_text("Admin only."); return
+        uid = int(q.data.replace("approve_", ""))
+        add_points(uid, 10)
+        conn = sqlite3.connect(DB); c = conn.cursor()
+        c.execute("DELETE FROM pending WHERE user_id=?", (uid,))
+        conn.commit(); conn.close()
+        await q.message.reply_text(f"✅ Approved! User {uid} got +10 points.")
+        try:
+            await context.bot.send_message(chat_id=uid, text="🎉 Admin ya amince! Ka samu +10 points don Raid dinka!")
+        except: pass
+    elif q.data.startswith("reject_"):
+        if q.from_user.id != ADMIN_ID:
+            await q.message.reply_text("Admin only."); return
+        uid = int(q.data.replace("reject_", ""))
+        conn = sqlite3.connect(DB); c = conn.cursor()
+        c.execute("DELETE FROM pending WHERE user_id=?", (uid,))
+        conn.commit(); conn.close()
+        await q.message.reply_text(f"❌ Rejected user {uid}.")
+        try:
+            await context.bot.send_message(chat_id=uid, text="❌ Admin bai amince da screenshot dinka ba. Ka sake gwadawa.")
+        except: pass
 
 async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
@@ -298,8 +323,6 @@ def main():
         b.add_handler(CommandHandler("leaderboard", leaderboard))
         b.add_handler(CommandHandler("newraid", newraid))
         b.add_handler(CommandHandler("setraid", setraid))
-        b.add_handler(CommandHandler("approve", approve))
-        b.add_handler(CommandHandler("reject", reject))
         b.add_handler(CallbackQueryHandler(button_handler))
         b.add_handler(MessageHandler(filters.PHOTO, handle_photo))
         b.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
