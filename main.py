@@ -11,6 +11,7 @@ import sqlite3
 # ========== SETTINGS ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "Put Your Token Here")
 GROUP_USERNAME = "@governpublic"
+GROUP_ID = os.getenv("GROUP_ID", "-1004325278182")
 GROUP_LINK = "https://t.me/governpublic"
 BOT_USERNAME = "GovernWatchBot"
 ADMIN_ID = 1375360019
@@ -141,7 +142,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     try:
-        member = await context.bot.get_chat_member(GROUP_USERNAME, user.id)
+        member = await context.bot.get_chat_member(GROUP_ID, user.id)
         if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER, ChatMemberStatus.CREATOR]:
             conn = get_db(); cur = conn.cursor()
             cur.execute("SELECT * FROM verified WHERE user_id=?", (user.id,))
