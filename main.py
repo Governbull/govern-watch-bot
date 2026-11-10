@@ -4,20 +4,24 @@ import logging
 import time
 from datetime import date
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from flask import Flask
 import threading
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 GROUP_ID = int(os.getenv("GROUP_ID", "-1004325278182"))
-# FIXED: Your Admin ID is now hardcoded, no need to set in Render
 ADMIN_ID = int(os.getenv("ADMIN_ID", "1375360019"))
 X_LINK = "https://x.com/Governbull"
 RAID_LINK = os.getenv("RAID_LINK", "https://x.com/Governbull")
+RAID_FILE = "current_raid.txt"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 DB = "govern.db"
+
+# Anti-cheat storage
+raid_start_time = {}
+pending_raid_proof = {}
 
 def init_db():
     conn = sqlite3.connect(DB)
@@ -84,12 +88,31 @@ def set_verified(uid, uname):
     return True, new
 
 def get_active_raid():
+    # 1. Try file first - survives restart
+    try:
+        with open(RAID_FILE, "r") as f:
+            link = f.read().strip()
+            if link:
+                return (0, link)
+    except:
+        pass
+    # 2. Try DB
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("SELECT id, link FROM raids WHERE active=1 ORDER BY id DESC LIMIT 1")
     row = c.fetchone()
     conn.close()
     return row
+
+def save_raid_link(link):
+    with open(RAID_FILE, "w") as f:
+        f.write(link)
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("UPDATE raids SET active=0")
+    c.execute("INSERT INTO raids (link, active) VALUES (?,1)", (link,))
+    conn.commit()
+    conn.close()
 
 def get_rank(uid):
     conn = sqlite3.connect(DB)
@@ -104,7 +127,7 @@ def get_rank(uid):
 
 TASKS = [
     {"id": "join_tg", "title": "Join Telegram Group", "points": 20, "desc": "Join @governpublic and /verify"},
-    {"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect your_x_username"},
+    {"id": "connect_x", "title": "Connect Your X", "points": 10, "desc": "Use /connect"},
     {"id": "follow_x", "title": "Follow @Governbull on X", "points": 20, "desc": "Follow https://x.com/Governbull then claim"},
     {"id": "first_raid", "title": "Complete First Raid", "points": 50, "desc": "Do /raid then DONE"},
     {"id": "raid_5", "title": "Complete 5 Raids", "points": 100, "desc": "Do 5 raids total"},
@@ -152,16 +175,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome to $GOVERN Watch Bot!\n\n"
         "CONNECT FIRST OR YOUR WORK WILL NOT COUNT\n\n"
-        "HOW TO RAID - 4 STEPS:\n"
+        "HOW TO RAID:\n"
         "Step 1: /connect - Connect your X FIRST (Only Once)\n"
         "Step 2: /raid - Click RAID Link\n"
         "Step 3: Go to X, Like, Retweet, Reply with YOUR OWN WORDS\n"
-        "Step 4: Come back and click DONE / /done\n\n"
+        "Step 4: Wait 2 Minutes, Click DONE, Send Screenshot\n"
+        "Step 5: Wait for Admin Approval - +50 Points\n\n"
         "COMMANDS:\n"
         "/verify - Verify Telegram +20\n"
         "/connect - Connect X\n"
         "/raid - Current Raid\n"
-        "/done - Claim Raid +50\n"
+        "/done - Claim Raid (Old Method)\n"
         "/daily - Daily Check-in +10\n"
         "/tasks - All Tasks\n"
         "/claim <task_id> - Claim Task Reward\n"
@@ -205,7 +229,7 @@ async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user.id, user.username or user.first_name)
     if not context.args:
-        await update.message.reply_text("CONNECT YOUR X FIRST (Only Once)\n\nType:\n/connect your_x_username\n\nExample:\n/connect Ukona123")
+        await update.message.reply_text("CONNECT YOUR X FIRST (Only Once)\n\nType:\n/connect your_x_username")
         return
     x_user = context.args[0].replace("@", "").strip()
     conn = sqlite3.connect(DB)
@@ -221,6 +245,8 @@ async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not row or not row[2]:
         await update.message.reply_text("CONNECT FIRST OR YOUR WORK WILL NOT COUNT\n\nConnect your X first:\n/connect your_x_username\nThen type /raid again.")
         return
+    # Start 2-minute timer
+    raid_start_time[user.id] = time.time()
     active = get_active_raid()
     link = active[1] if active else RAID_LINK
     keyboard = [
@@ -229,10 +255,11 @@ async def raid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text(
         "$GOVERN RAID IS LIVE!\n\n"
-        "Step 2: Click RAID Link\n"
-        "Step 3: On X - Like, Retweet, Reply with YOUR OWN WORDS\n"
-        "Example: 'This is real governance, WE GOVERN!' - use your own style\n"
-        "Step 4: Come back and click DONE\n\n"
+        "Step 1: Click RAID Link\n"
+        "Step 2: On X - Like, Retweet, Reply with YOUR OWN WORDS\n"
+        "Step 3: WAIT 2 MINUTES - Do not click DONE early\n"
+        "Step 4: Click DONE, then send your Screenshot\n"
+        "Step 5: Wait for Admin Approval - +50 Points\n\n"
         "Follow: https://x.com/Governbull\n"
         "PUBLIC GOAL: Likes 100% | Retweets 100% | Replies 100%\n"
         "WORK TOGETHER - STAY ACTIVE",
@@ -249,36 +276,106 @@ async def myraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"YOUR RAID STATS\n\nX: @{x or 'Not Connected'}\nRaids Completed: {raids}\nPoints: {pts}\nRank: #{get_rank(user.id)}")
 
 async def done_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_done(update.effective_user, update.message.reply_text)
+    # Old direct claim - now redirects to new secure flow
+    await update.message.reply_text("Please use /raid and click DONE button, then send Screenshot for approval.")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     if q.data == "raid_done":
-        await handle_done(q.from_user, q.edit_message_text)
+        user_id = q.from_user.id
+        row = get_user(user_id)
+        if not row or not row[2]:
+            await q.message.reply_text("Connect X first! Type /connect your_x_username")
+            return
+        # Check 2-minute rule
+        start = raid_start_time.get(user_id, 0)
+        passed = time.time() - start
+        if passed < 120:
+            left = int(120 - passed)
+            await q.answer(f"Please wait! {left} seconds left. Go and do the raid properly!", show_alert=True)
+            return
+        # Check 1-hour cooldown
+        pts, ver, x, raids, invites, last_daily, streak, last_raid = row
+        now = int(time.time())
+        if now - last_raid < 3600 and last_raid != 0:
+            mins = (3600 - (now - last_raid)) // 60
+            await q.message.reply_text(f"Wait {mins} minutes before next Raid claim.\nAnti-spam cooldown: 1 Raid per hour.")
+            return
+        pending_raid_proof[user_id] = True
+        await q.message.reply_text(
+            "2 Minutes Completed!\n\n"
+            "Now send a SCREENSHOT of your Like + Repost + Reply on X.\n"
+            "Without Screenshot, you will NOT get Points."
+        )
     elif q.data.startswith("claim_"):
         task_id = q.data.replace("claim_", "")
         await handle_claim(q.from_user, task_id, q.edit_message_text)
 
-async def handle_done(user, reply_func):
-    row = get_user(user.id)
-    if not row or not row[2]:
-        await reply_func("Connect X first! Type /connect your_x_username")
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in pending_raid_proof:
+        return
+    # Forward screenshot to Admin
+    try:
+        await context.bot.forward_message(chat_id=ADMIN_ID, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+        row = get_user(user_id)
+        x_name = row[2] if row else "Unknown"
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"NEW RAID PROOF\nUser: @{update.effective_user.username or update.effective_user.first_name}\nID: {user_id}\nX: @{x_name}\n\nTo Approve: /approve {user_id}\nTo Reject: /reject {user_id}"
+        )
+        await update.message.reply_text("Screenshot sent to Admin. Wait for approval. You will get +50 Points if approved.")
+        del pending_raid_proof[user_id]
+    except Exception as e:
+        logger.error(e)
+        await update.message.reply_text("Error sending screenshot. Try again.")
+
+async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Admin only.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /approve USER_ID")
+        return
+    try:
+        target_id = int(context.args[0])
+    except:
+        return
+    row = get_user(target_id)
+    if not row:
         return
     pts, ver, x, raids, invites, last_daily, streak, last_raid = row
     now = int(time.time())
-    if now - last_raid < 3600:
-        mins = (3600 - (now - last_raid)) // 60
-        await reply_func(f"Wait {mins} minutes before next Raid claim.\nAnti-spam cooldown: 1 Raid per hour.")
-        return
     new_pts = pts + 50
     new_raids = raids + 1
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("UPDATE users SET points=?, raids=?, last_raid_time=? WHERE user_id=?", (new_pts, new_raids, now, user.id))
+    c.execute("UPDATE users SET points=?, raids=?, last_raid_time=? WHERE user_id=?", (new_pts, new_raids, now, target_id))
     conn.commit()
     conn.close()
-    await reply_func(f"RAID COUNTED!\n\nX: @{x}\n+50 Points for Raid!\nTotal Raids: {new_raids}\nTotal Points: {new_pts}\n\nWE GOVERN!")
+    try:
+        await context.bot.send_message(chat_id=target_id, text=f"RAID APPROVED!\n\nX: @{x}\n+50 Points for Raid!\nTotal Raids: {new_raids}\nTotal Points: {new_pts}\n\nWE GOVERN!")
+    except:
+        pass
+    await update.message.reply_text(f"Approved! User {target_id} got +50 Points. Total Raids: {new_raids}")
+
+async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Admin only.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /reject USER_ID")
+        return
+    try:
+        target_id = int(context.args[0])
+    except:
+        return
+    try:
+        await context.bot.send_message(chat_id=target_id, text="RAID REJECTED.\nYour Screenshot was not valid. Please do the raid properly - Like, Repost, Reply with your own words - and try again.")
+    except:
+        pass
+    await update.message.reply_text(f"Rejected user {target_id}.")
 
 async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -385,104 +482,4 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rank = get_rank(user.id)
     status = "Verified" if ver == 1 else "Not Verified"
     badge = "GOVERNOR" if pts >= 500 else "ELITE" if pts >= 200 else "CHAMPION" if pts >= 100 else "CITIZEN" if pts >= 20 else "NEWCOMER"
-    await update.message.reply_text(f"YOUR $GOVERN PROFILE\n\nName: @{user.username or user.first_name}\nX: @{x or 'Not Connected'}\nStatus: {status}\nBadge: {badge}\nPoints: {pts}\nRaids: {raids}\nInvites: {invites}\nDaily Streak: {streak} days\nRank: #{rank}")
-
-async def rank_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    row = get_user(user.id)
-    if not row:
-        await update.message.reply_text("Type /verify first.")
-        return
-    pts = row[0]
-    rank = get_rank(user.id)
-    await update.message.reply_text(f"@{user.username or user.first_name}\nYour Rank: #{rank}\nPoints: {pts}")
-
-async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT username, points, raids FROM users ORDER BY points DESC LIMIT 10")
-    rows = c.fetchall()
-    conn.close()
-    if not rows:
-        await update.message.reply_text("No citizens yet. /verify")
-        return
-    txt = "$GOVERN Leaderboard\n\n"
-    for i, (u, p, r) in enumerate(rows, 1):
-        txt += f"{i}. @{u} - {p} pts | {r} raids\n"
-    await update.message.reply_text(txt)
-
-async def newraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Admin only - now secured with your fixed ID 1375360019
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Admin only.")
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /newraid <x_link>\nExample: /newraid https://x.com/Governbull/status/123456")
-        return
-    link = context.args[0]
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("UPDATE raids SET active=0")
-    c.execute("INSERT INTO raids (link, active) VALUES (?,1)", (link,))
-    conn.commit()
-    conn.close()
-    await update.message.reply_text(f"New Raid Set!\n{link}\n\nEveryone who sends /raid will now see this post.")
-
-async def setraid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Alias for /newraid - same function, easier to remember
-    await newraid(update, context)
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "GOVERN Bot is Live!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-def main():
-    print("=== STARTING BOT ===", flush=True)
-    print(f"BOT_TOKEN exists? {bool(BOT_TOKEN)} - Length: {len(BOT_TOKEN)}", flush=True)
-    print(f"GROUP_ID: {GROUP_ID}", flush=True)
-    print(f"ADMIN_ID: {ADMIN_ID}", flush=True)
-    if not BOT_TOKEN:
-        print("ERROR: BOT_TOKEN IS MISSING!", flush=True)
-        while True:
-            time.sleep(60)
-    try:
-        init_db()
-        threading.Thread(target=run_flask, daemon=True).start()
-        print("Flask started, starting Telegram polling...", flush=True)
-        b = ApplicationBuilder().token(BOT_TOKEN).build()
-        b.add_handler(CommandHandler("start", start))
-        b.add_handler(CommandHandler("help", start))
-        b.add_handler(CommandHandler("verify", verify))
-        b.add_handler(CommandHandler("connect", connect))
-        b.add_handler(CommandHandler("raid", raid))
-        b.add_handler(CommandHandler("done", done_cmd))
-        b.add_handler(CommandHandler("myraid", myraid))
-        b.add_handler(CommandHandler("daily", daily))
-        b.add_handler(CommandHandler("tasks", tasks_cmd))
-        b.add_handler(CommandHandler("claim", claim_cmd))
-        b.add_handler(CommandHandler("invite", invite_cmd))
-        b.add_handler(CommandHandler("points", points))
-        b.add_handler(CommandHandler("profile", profile))
-        b.add_handler(CommandHandler("myprofile", profile))
-        b.add_handler(CommandHandler("rank", rank_cmd))
-        b.add_handler(CommandHandler("leaderboard", leaderboard))
-        b.add_handler(CommandHandler("newraid", newraid))
-        b.add_handler(CommandHandler("setraid", setraid))
-        b.add_handler(CallbackQueryHandler(button_handler))
-        print("Bot Started...", flush=True)
-        b.run_polling()
-    except Exception as e:
-        print(f"FATAL ERROR: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        while True:
-            time.sleep(60)
-
-if __name__ == "__main__":
-    main()
+    await update.message.r
