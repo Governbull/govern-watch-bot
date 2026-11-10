@@ -11,7 +11,7 @@ import sqlite3
 # ========== SETTINGS ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN", "Put Your Token Here")
 GROUP_USERNAME = "@governpublic"
-GROUP_ID = os.getenv("GROUP_ID", "-1004325278182")
+GROUP_ID = int(os.getenv("GROUP_ID", "-1004325278182"))
 GROUP_LINK = "https://t.me/governpublic"
 BOT_USERNAME = "GovernWatchBot"
 ADMIN_ID = 1375360019
