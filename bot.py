@@ -5,7 +5,8 @@ from flask import Flask
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters, ChatMemberHandler
+from telegram.constants import ChatMemberStatus
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -93,8 +94,6 @@ def get_badge(pts):
 
 async def check_group(update):
     if update.effective_chat.type in ["group", "supergroup"]:
-        try: await update.message.reply_text("Please use DM @GovernWatchBot")
-        except: pass
         return True
     return False
 
@@ -122,6 +121,34 @@ def check_task(uid, tid, row):
     if tid == "invite_3": return get_invite_count(uid) >= 3
     if tid == "daily_7": return (row[4] or 0) >= 7
     return False
+
+async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result = update.chat_member
+    if result is None:
+        return
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
+    if old_status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED] and new_status == ChatMemberStatus.MEMBER:
+        user = result.new_chat_member.user
+        if user.is_bot:
+            return
+        name = user.first_name
+        username = f"@{user.username}" if user.username else name
+        kb = [[InlineKeyboardButton("🚀 Start Earning GVNP", url=f"https://t.me/{context.bot.username}?start")]]
+        txt = (
+            f"👑 WELCOME TO GOVERN, {name}! {username} 👑\n\n"
+            f"We are happy to have you here.\n\n"
+            f"🔥 You are now part of the GOVERN Family.\n"
+            f"💰 Earn GVNP - Our Community Token\n\n"
+            f"👉 STEP 1: Go to @GovernWatchBot\n"
+            f"👉 STEP 2: Tap ✅ Verify\n"
+            f"👉 STEP 3: Tap 🎯 Tasks and Start Earning\n\n"
+            f"Do not just watch. Join us. WE GOVERN. WE DON'T FOLLOW. 👑"
+        )
+        try:
+            await context.bot.send_message(chat_id=result.chat.id, text=txt, reply_markup=InlineKeyboardMarkup(kb))
+        except Exception as e:
+            print(e, flush=True)
 
 async def do_start(update, context, invited_by=None):
     user = update.effective_user
@@ -256,7 +283,7 @@ async def verify_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type in ["group", "supergroup"]:
-        await update.message.reply_text("Please send screenshot in DM @GovernWatchBot"); return
+        return
     user = update.effective_user
     if not get_user(user.id):
         await update.message.reply_text("Tap ✅ Verify first.", reply_markup=main_menu(False)); return
@@ -419,6 +446,7 @@ def main():
     app_bot.add_handler(CommandHandler("verify", verify_cmd))
     app_bot.add_handler(CommandHandler("newraid", newraid))
     app_bot.add_handler(CommandHandler("setraid", newraid))
+    app_bot.add_handler(ChatMemberHandler(welcome_new_member, ChatMemberHandler.CHAT_MEMBER))
     app_bot.add_handler(CallbackQueryHandler(button_handler))
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
